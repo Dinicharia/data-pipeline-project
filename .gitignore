@@ -1,0 +1,14 @@
+venv/
+data/
+logs
+config/secrets.env
+__pycache__/
+cat > .gitignore << EOF
+venv/
+data/
+logs
+config/secrets.env
+__pycache__/
+*.pyc
+.env
+.env

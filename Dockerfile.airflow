@@ -1,0 +1,20 @@
+# Dockerfile.airflow
+# Extends the official Airflow image with our extra dependencies.
+# This is the correct production approach — packages installed here
+# survive container restarts, unlike pip install at runtime.
+
+FROM apache/airflow:2.9.1
+
+# Switch to airflow user before installing packages
+# (the official image runs as airflow, not root)
+USER airflow
+
+# Install our pipeline's Python dependencies
+# --constraint ensures versions are compatible with Airflow's own deps
+RUN pip install --no-cache-dir \
+    apache-airflow-providers-postgres \
+    pandas \
+    numpy \
+    requests \
+    psycopg2-binary \
+    python-dotenv

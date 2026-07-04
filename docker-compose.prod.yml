@@ -1,0 +1,38 @@
+# docker-compose.prod.yml
+# Production deployment — extends docker-compose.yml with
+# production-specific settings.
+#
+# Usage:
+#   docker compose -f docker-compose.yml \
+#                  -f docker-compose.prod.yml up -d
+
+services:
+
+  postgres:
+    restart: always
+    environment:
+      POSTGRES_DB:       ${DB_NAME}
+      POSTGRES_USER:     ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    # Production: don't expose postgres port externally
+    # (only accessible to other containers on the same network)
+    ports: []
+
+  pipeline:
+    restart: "no"          # pipeline runs once — scheduler handles restarts
+    environment:
+      ENVIRONMENT: production
+      LOG_LEVEL:   INFO
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"   # rotate logs at 100MB
+        max-file: "10"     # keep 10 rotated files
+    deploy:
+      resources:
+        limits:
+          cpus: '2'         # max 2 CPU cores
+          memory: 2G        # max 2GB RAM
+        reservations:
+          cpus: '0.5'
+          memory: 512M

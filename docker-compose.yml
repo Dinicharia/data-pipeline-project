@@ -1,0 +1,65 @@
+# docker-compose.yml
+# The complete pipeline stack:
+#   - PostgreSQL database
+#   - Our ETL pipeline (runs once then exits)
+#
+# Usage:
+#   Start database:       docker compose up -d postgres
+#   Run pipeline once:    docker compose run --rm pipeline
+#   Run on schedule:      use Airflow (docker-compose.airflow.yml)
+
+services:
+
+  # ── PostgreSQL — our pipeline database ─────────────────────────────────────
+  postgres:
+    image: postgres:15
+    container_name: pipeline-postgres
+    environment:
+      POSTGRES_DB:       ${DB_NAME}
+      POSTGRES_USER:     ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      # host_port:container_port
+      # Access from Windows: localhost:5432
+      # Access from other containers: postgres:5432
+      - "5433:5432"    # use 5433 on host to avoid conflict with your
+                       # existing local PostgreSQL on 5432
+    volumes:
+      # Named volume: data persists across container restarts
+      # Without this, ALL data is lost when the container stops
+      - postgres-data:/var/lib/postgresql/data
+      # Mount our schema file so it runs on first startup
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${DB_USER}", "-d", "${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+
+  # ── Pipeline — our ETL application ─────────────────────────────────────────
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pipeline-etl
+    env_file:
+      - .env          # loads all variables from .env file
+    environment:
+      # Override DB_HOST — inside Docker, use the service name not localhost
+      DB_HOST: postgres
+      DB_PORT: 5432
+    depends_on:
+      postgres:
+        condition: service_healthy    # wait until postgres passes healthcheck
+    volumes:
+      # Mount data and logs directories so files persist on your Windows machine
+      - ./data:/app/data
+      - ./logs:/app/logs
+    # No restart policy — pipeline runs once and exits
+    # Use Airflow/Prefect for scheduling
+
+
+volumes:
+  postgres-data:    # named volume — Docker manages the storage location

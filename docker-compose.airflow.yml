@@ -1,0 +1,159 @@
+# docker-compose.airflow.yml
+# Runs Apache Airflow with all required services.
+# Start with: docker compose -f docker-compose.airflow.yml up -d
+# Stop with:  docker compose -f docker-compose.airflow.yml down
+
+x-airflow-common:
+  # This is a YAML anchor — defines shared config used by all
+  # Airflow services below. Avoids repeating the same block 4 times.
+  &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  environment:
+    &airflow-common-env
+    # Tell Airflow to use PostgreSQL as its metadata database
+    # (separate from OUR pipeline database)
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+
+    # CeleryExecutor: tasks run on distributed workers via Redis queue
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@airflow-postgres/airflow
+    AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
+
+    # Security: Fernet key encrypts sensitive data (connections, variables)
+    # Generate your own with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    AIRFLOW__CORE__FERNET_KEY: ''
+
+    # Don't load the example DAGs that come with Airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+
+    # Our pipeline's secrets — passed into every Airflow container
+    WEATHER_API_KEY: ${WEATHER_API_KEY}
+    GITHUB_TOKEN: ${GITHUB_TOKEN}
+    NASA_API_KEY: ${NASA_API_KEY}
+    DB_HOST: ${DB_HOST}
+    DB_PORT: ${DB_PORT}
+    DB_NAME: ${DB_NAME}
+    DB_USER: ${DB_USER}
+    DB_PASSWORD: ${DB_PASSWORD}
+
+  volumes:
+    # Mount our local folders into the containers
+    # Changes you make locally appear instantly inside the container
+    - ./airflow/dags:/opt/airflow/dags        # DAG files
+    - ./airflow/logs:/opt/airflow/logs        # task logs
+    - ./airflow/plugins:/opt/airflow/plugins  # custom plugins
+    - ./src:/opt/airflow/src                  # our pipeline src code
+    - ./config:/opt/airflow/config            # secrets.env
+
+  depends_on:
+    &airflow-common-depends-on
+    redis:
+      condition: service_healthy
+    airflow-postgres:
+      condition: service_healthy
+
+services:
+
+  # ── Airflow's own PostgreSQL metadata database ───────────────────────────
+  # This is SEPARATE from our pipeline database
+  # It stores DAG definitions, task states, logs, connections, variables
+  airflow-postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+  # ── Redis: message broker between scheduler and workers ─────────────────
+  redis:
+    image: redis:7.2-bookworm
+    expose:
+      - 6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 30s
+      retries: 50
+      start_period: 30s
+    restart: always
+
+  # ── Airflow Webserver: the UI at localhost:8080 ──────────────────────────
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"       # access at http://localhost:8080
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ── Airflow Scheduler: watches DAGs, triggers runs on schedule ──────────
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ── Airflow Worker: actually executes the tasks ──────────────────────────
+  airflow-worker:
+    <<: *airflow-common
+    command: celery worker
+    environment:
+      <<: *airflow-common-env
+      DUMB_INIT_SETSID: "0"
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ── Airflow Init: runs once to set up the database ──────────────────────
+  # Creates tables, creates the admin user, then exits
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username admin \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@pipeline.com \
+          --password admin
+        echo "Airflow initialized successfully"
+    environment:
+      <<: *airflow-common-env
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  airflow-postgres-data:

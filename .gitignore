@@ -1,14 +1,32 @@
+cat > .gitignore << 'EOF'
+# Python
 venv/
-data/
-logs
-config/secrets.env
-__pycache__/
-cat > .gitignore << EOF
-venv/
-data/
-logs
-config/secrets.env
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Secrets — never commit these
 .env
-.env
+config/secrets.env
+*.key
+*.pem
+
+# Data and logs — too large, regeneratable
+data/
+logs/
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Docker
+docker-compose.override.yml
+
+# OS
+.DS_Store
+Thumbs.db
+EOF

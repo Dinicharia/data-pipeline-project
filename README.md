@@ -225,7 +225,7 @@ Every pipeline run creates a record in `pipeline_runs` before any work starts, a
 ### 1. Clone and Set Up
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/data-pipeline-project.git
+git clone https://github.com/dinicharia/data-pipeline-project.git
 cd data_pipeline_project
 
 # Create and activate virtual environment
